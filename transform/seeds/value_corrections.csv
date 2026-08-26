@@ -1,0 +1,2 @@
+reg_id,indicator,multiplier,reason
+DE7,POP_DEN_GR_T,0.01,DE7 2001 surface area is wrong by an order of magnitude in the source data which inflates the 2001-base density growth index by 100x; verified by recomputing from the 2002 surface (21114.2 km2)

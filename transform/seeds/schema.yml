@@ -1,0 +1,93 @@
+version: 2
+
+seeds:
+  - name: excluded_reg_ids
+    description: >
+      REG_IDs removed from the well-being table before any other processing.
+      These are ISO3 country codes appearing as region identifiers, i.e.
+      national aggregate rows. The analysis is subnational, so they are not
+      valid units of observation.
+    config:
+      column_types:
+        reg_id: varchar
+        reason: varchar
+    columns:
+      - name: reg_id
+        tests: [unique, not_null]
+      - name: reason
+        tests: [not_null]
+
+  - name: dropped_indicators
+    description: >
+      Indicators removed from the wide well-being table. Dropping these before
+      the completeness filter keeps regions that would otherwise be discarded
+      for missing them.
+    config:
+      column_types:
+        indicator: varchar
+        reason: varchar
+    columns:
+      - name: indicator
+        tests: [unique, not_null]
+      - name: reason
+        tests: [not_null]
+
+  - name: value_corrections
+    description: >
+      Manual corrections to erroneous source values, applied as a multiplier.
+      Every row must carry a justification that a reader can verify
+      independently.
+    config:
+      column_types:
+        reg_id: varchar
+        indicator: varchar
+        multiplier: double
+        reason: varchar
+    columns:
+      - name: reg_id
+        tests: [not_null]
+      - name: indicator
+        tests: [not_null]
+      - name: multiplier
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator]
+
+  - name: indicator_precedence
+    description: >
+      Indicators appearing in more than one source file. Declares which source
+      supplies the value; rows from all other sources are dropped.
+    config:
+      column_types:
+        indicator: varchar
+        winning_source: varchar
+        reason: varchar
+    columns:
+      - name: indicator
+        tests: [unique, not_null]
+      - name: winning_source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [wellbeing, demographic, labour, innovation, social, economic]
+      - name: reason
+        tests: [not_null]
+  - name: economic_measures
+    description: >
+      MEAS values retained from the economic source. The economic file carries
+      the same VAR at several measurement bases (levels, per-capita, growth
+      indices with different reference years); this seed declares which are used.
+    config:
+      column_types:
+        meas: varchar
+        reason: varchar
+    columns:
+      - name: meas
+        tests: [unique, not_null]
+      - name: reason
+        tests: [not_null]

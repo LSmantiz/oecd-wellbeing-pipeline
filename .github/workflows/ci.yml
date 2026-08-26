@@ -1,0 +1,24 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: transform
+    env:
+      DBT_PROFILES_DIR: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r ../requirements.txt
+
+      - run: dbt deps
+
+      - run: 'dbt build --vars "raw_data_dir: ../tests/fixtures/oecd_regional_2016"'

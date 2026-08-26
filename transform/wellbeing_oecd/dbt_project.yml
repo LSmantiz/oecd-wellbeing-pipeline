@@ -1,0 +1,22 @@
+name: oecd_wellbeing
+version: 1.0.0
+profile: oecd_wellbeing
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+
+vars:
+  raw_data_dir: "../../data/original_data/oecd_regional_2016"
+  min_year: 2006
+
+models:
+  oecd_wellbeing:
+    raw:
+      +materialized: table
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table

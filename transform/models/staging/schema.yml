@@ -1,0 +1,166 @@
+version: 2
+
+models:
+  - name: stg_wellbeing
+    description: >
+      Well-being indicators, long format, one row per region-indicator at its
+      most recent available year. Country-level aggregates and dropped
+      indicators are already excluded.
+    columns:
+      - name: reg_id
+        tests: [not_null]
+      - name: indicator
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator, year]
+
+  - name: stg_demographic
+    description: >
+      Regional demographic indicators in long format, one row per region and
+      indicator at the most recent year available for that series.
+
+      Indicators are keyed by VAR and SEX, concatenated into a single
+      `indicator` string (e.g. `POP_DEN_T`), since the warehouse stays long and
+      the pivot to wide happens at the Python boundary.
+
+      Restricted to regions present in stg_wellbeing, to rows where POS = 'ALL'
+      (excluding rank and position variants of the same series), and to
+      observations from {{ var('min_year') }} onwards. Rows that are identical
+      across keys and value are collapsed; the uniqueness test below asserts
+      that exactly one observation per region-indicator survives.
+    columns:
+      - name: reg_id
+        description: OECD region identifier. The only reliable join key across
+          source files, since region labels differ in spelling and language
+          between files for the same region.
+        tests: [not_null]
+      - name: region
+        description: Region label as given in this source file. Carried for
+          inspection only; never joined on.
+      - name: indicator
+        description: VAR and SEX joined with an underscore.
+        tests: [not_null]
+      - name: year
+        description: Year of the retained observation. Varies by series, since
+          the most recent year is taken per region-indicator rather than a
+          common year across all series.
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
+      - name: source
+        description: Constant 'demographic', used to resolve precedence when
+          sources are unioned downstream.
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator, year]
+
+  - name: stg_labour
+    description: >
+      Regional labour market indicators in long format, one row per region and
+      indicator at the most recent year available for that series. Keyed by VAR
+      and SEX, concatenated into a single `indicator` string. Same filters as
+      stg_demographic: regions present in stg_wellbeing, POS = 'ALL', and
+      observations from {{ var('min_year') }} onwards.
+    columns:
+      - name: reg_id
+        tests: [not_null]
+      - name: indicator
+        tests: [not_null]
+      - name: year
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
+      - name: source
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator, year]
+  
+  - name: stg_economic
+    description: >
+      Regional economic indicators in long format, one row per region and
+      indicator at the most recent year available for that series.
+
+      Indicators are keyed by VAR and MEAS, concatenated into a single
+      `indicator` string (e.g. `GDP_USD_PPP`), because the economic file
+      publishes the same variable at several measurement bases — absolute
+      levels, per-capita values, rates, and growth indices on two different
+      reference years. VAR alone is therefore not a unique key here, unlike in
+      the innovation and social sources.
+
+      Filters, beyond those shared with the other staging models: restricted to
+      SERIES = 'SNA_2008', the 2008 System of National Accounts vintage, since
+      the file also carries the earlier SNA_1993 series and mixing the two would
+      compare incompatible definitions; and to the MEAS values declared in the
+      economic_measures seed.
+
+      This source overlaps with stg_wellbeing for some indicators. Precedence is
+      not resolved here — staging represents each source faithfully — but
+      downstream in the intermediate layer, via the indicator_precedence seed.
+    columns:
+      - name: reg_id
+        description: OECD region identifier; the only reliable cross-file join key.
+        tests: [not_null]
+      - name: region
+        description: Region label from this source file. Carried for inspection
+          only; never joined on, since labels differ across files.
+      - name: indicator
+        description: VAR and MEAS joined with an underscore.
+        tests: [not_null]
+      - name: year
+        description: Year of the retained observation. Varies by series, since
+          the most recent year is taken per region-indicator rather than a
+          common year across all series.
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
+      - name: source
+        description: Constant 'economic', used to resolve precedence when
+          sources are unioned downstream.
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator, year]
+            
+  - name: stg_innovation
+    description: >
+      Regional innovation indicators in long format, one row per region,
+      indicator and year. Keyed by VAR alone, so `indicator` is the bare
+      variable code with no concatenation, unlike the demographic, labour and
+      economic sources.
+
+      Full history is retained. Only POS = 'ALL' is applied, which selects the
+      value rather than its rank or position variant; every analysis-level
+      filter — the year cutoff, latest-per-series selection, region
+      restriction, precedence and completeness — happens downstream in marts.
+    columns:
+      - name: reg_id
+        description: OECD region identifier; the only reliable cross-file join key.
+        tests: [not_null]
+      - name: region
+        description: Region label from this source file. Carried for inspection
+          only; never joined on, since labels differ across files for the same
+          region.
+      - name: indicator
+        description: The VAR code as published.
+        tests: [not_null]
+      - name: year
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
+      - name: source
+        description: Constant 'innovation', used to resolve precedence when
+          sources are unioned downstream.
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator, year]

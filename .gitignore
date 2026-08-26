@@ -1,0 +1,9 @@
+.venv/
+warehouse.duckdb
+transform/target/
+transform/dbt_packages/
+transform/logs/
+__pycache__/
+.ipynb_checkpoints/
+data/original_data/
+data/processed_data/
