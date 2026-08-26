@@ -23,5 +23,5 @@ latest as (
     qualify year = max(year) over (partition by reg_id, indicator)
 )
 
-select reg_id, region, indicator, year, value
+select reg_id, region, indicator, year, value, 'wellbeing' as source
 from latest

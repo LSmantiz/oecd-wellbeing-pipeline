@@ -16,6 +16,15 @@ filtered as (
     from source
     where pos = 'ALL'
       and left(tl, 1) != '1'
+),
+
+preferred_level as (
+    select *
+    from filtered
+    qualify row_number() over (
+        partition by reg_id, var, year
+        order by case when tl = '2' then 1 else 2 end, tl
+    ) = 1
 )
 
 select
@@ -25,4 +34,4 @@ select
     year,
     value,
     'demographic' as source
-from filtered
+from preferred_level
