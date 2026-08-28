@@ -20,7 +20,10 @@ filtered as (
 latest as (
     select *
     from filtered
-    qualify year = max(year) over (partition by reg_id, indicator)
+    qualify row_number() over (
+        partition by reg_id, indicator, year
+        order by value
+    ) = 1
 )
 
 select reg_id, region, indicator, year, value, 'wellbeing' as source

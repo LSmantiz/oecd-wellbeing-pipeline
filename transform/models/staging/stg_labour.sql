@@ -22,7 +22,7 @@ preferred_level as (
     select *
     from filtered
     qualify row_number() over (
-        partition by reg_id, var, year
+        partition by reg_id, var, sex, year
         order by case when tl = '2' then 1 else 2 end, tl
     ) = 1
 )

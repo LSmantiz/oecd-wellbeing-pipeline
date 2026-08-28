@@ -1,0 +1,74 @@
+version: 2
+
+models:
+  - name: mart_indicators_latest
+    description: >
+      One row per region, indicator and source, at the most recent year
+      available for that series from {{ var('min_year') }} onwards. This is the
+      first mart step: the year cutoff and latest-per-series selection are
+      analysis decisions, not properties of the source data, which is why they
+      happen here rather than in staging.
+    columns:
+      - name: reg_id
+        tests: [not_null]
+      - name: indicator
+        tests: [not_null]
+      - name: year
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
+      - name: source
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator, source]
+
+  - name: mart_indicators_resolved
+    description: >
+      Restricted to regions with a complete set of well-being indicators, with
+      source collisions resolved via the indicator_precedence seed and value
+      corrections applied from the value_corrections seed.
+
+      The region restriction is the step that drops EE00, Estonia's TL2 entry,
+      which carries only SUBJ_PERC_CORR and no life satisfaction value. Its five
+      TL3 subdivisions are retained, so Estonian territory is represented once.
+    columns:
+      - name: reg_id
+        tests: [not_null]
+      - name: indicator
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator]
+
+  - name: mart_analysis_long
+    description: >
+      The analysis dataset, unscaled. Only indicators observed for every region
+      are retained, matching the completeness filter in the original pipeline.
+      Verified to reproduce data_unscaled.parquet exactly.
+    columns:
+      - name: reg_id
+        tests: [not_null]
+      - name: indicator
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [reg_id, indicator]
+
+  - name: mart_analysis_scaled
+    description: >
+      As mart_analysis_long, standardised per indicator using the sample
+      standard deviation (stddev_samp, ddof=1) to match R's sd(). Note this
+      differs from sklearn's StandardScaler, which uses ddof=0.
+    columns:
+      - name: reg_id
+        tests: [not_null]
+      - name: value
+        tests: [not_null]
