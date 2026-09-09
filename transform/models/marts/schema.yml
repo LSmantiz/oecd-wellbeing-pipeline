@@ -72,3 +72,33 @@ models:
         tests: [not_null]
       - name: value
         tests: [not_null]
+
+  - name: mart_region_completeness
+    description: >
+      One row per region: how many indicators it is missing, and its position in
+      the drop order used when trading regions for indicator coverage. Ties are
+      broken by reg_id so the order is reproducible.
+    columns:
+      - name: reg_id
+        tests: [unique, not_null]
+      - name: n_missing
+        tests: [not_null]
+      - name: drop_rank
+        tests: [unique, not_null]
+
+  - name: mart_completeness_frontier
+    description: >
+      The regions/indicators trade-off. Requiring every indicator to be observed
+      for every region means one poorly-covered region removes an indicator for
+      all of them, so dropping the worst-covered regions buys indicators back.
+      One row per number of regions dropped.
+
+      Once n_incomplete_regions reaches zero, further steps drop fully-observed
+      regions without recovering any indicators.
+    columns:
+      - name: n_dropped
+        tests: [unique, not_null]
+      - name: n_regions
+        tests: [not_null]
+      - name: n_indicators
+        tests: [not_null]

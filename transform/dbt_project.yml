@@ -9,6 +9,8 @@ test-paths: ["tests"]
 vars:
   raw_data_dir: "../data/original_data/oecd_regional_2016"
   min_year: 2006
+  frontier_max_dropped: 150
+  frontier_step: 10
 
 models:
   oecd_wellbeing:
