@@ -1,0 +1,496 @@
+---
+title: "Robustness across the completeness frontier"
+subtitle: "How results change when more indicators are bought at the cost of fewer regions"
+author: "Lasare Samartzidis"
+format:
+  html:
+    self-contained: true
+    toc: true
+    toc-depth: 3
+    fig-width: 12
+    fig-height: 7
+jupyter: python3
+execute:
+  warning: false
+crossref:
+  fig-title: Figure
+---
+
+```{python}
+#| echo: false
+from pathlib import Path
+import sys
+
+ROOT = Path.cwd()
+sys.path.insert(0, str(ROOT))
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from analysis.pipeline import load_all
+from analysis.frontier import load_frontier_summary, dropped_regions
+from analysis.labels import label, concept
+
+pd.set_option("display.precision", 3)
+
+WAREHOUSE = ROOT / "warehouse.duckdb"
+CACHE = ROOT / "analysis" / "output" / "frontier"
+
+results = load_all(CACHE)
+steps = sorted(results)
+
+if not steps:
+    raise RuntimeError(
+        "No cached results. Run: python -m analysis.run_frontier --steps 0 10 20 100 150"
+    )
+
+BASE = steps[0]
+
+# the predictors the manuscript builds its argument on, and their families
+MANUSCRIPT = ["SR_ELD_RA_T", "INCOME_DISP", "EMP_RA", "SUBJ_SOC_SUPP"]
+HEADLINE_CONCEPTS = sorted({concept(c) for c in MANUSCRIPT})
+```
+
+The analysis dataset requires every indicator to be observed for every region.
+One poorly-covered region therefore removes an indicator for all of them, and
+dropping the worst-covered regions buys indicators back. The published analysis
+sits at one point on that trade-off. This document asks whether its conclusions
+depend on where that point was.
+
+Results are read from cached runs of the full pipeline — predictor selection,
+tuning, importance, ALE and interactions — computed independently at each step.
+
+```{python}
+#| echo: false
+print(f"Steps analysed: {steps}")
+```
+
+## The trade-off
+
+```{python}
+#| label: fig-frontier
+#| column: page
+#| fig-cap: "Indicators gained against regions dropped. Circled points are analysed in detail."
+
+frontier = load_frontier_summary(WAREHOUSE)
+marked = frontier[frontier.n_dropped.isin(steps)]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+
+ax1.plot(frontier.n_dropped, frontier.n_indicators, marker="o",
+         color="black", markersize=4)
+ax1.scatter(marked.n_dropped, marked.n_indicators, s=110, facecolor="none",
+            edgecolor="firebrick", linewidth=2, zorder=3)
+ax1.set_ylabel("Indicators available")
+
+ax2.plot(frontier.n_dropped, frontier.n_cells, marker="o",
+         color="black", markersize=4)
+ax2.scatter(marked.n_dropped, marked.n_cells, s=110, facecolor="none",
+            edgecolor="firebrick", linewidth=2, zorder=3)
+ax2.set_ylabel("Total observations (regions x indicators)")
+
+for ax in (ax1, ax2):
+    ax.set_xlabel("Regions dropped")
+    ax.spines[["top", "right"]].set_visible(False)
+
+plt.tight_layout()
+```
+
+```{python}
+#| echo: false
+f = frontier.set_index("n_dropped")
+gained_first = int(f.n_indicators.iloc[1] - f.n_indicators.iloc[0])
+gained_rest = int(f.n_indicators.max() - f.n_indicators.iloc[1])
+share = f.index[1] / f.n_regions.iloc[0]
+peak = int(f.n_cells.idxmax())
+
+print(
+    f"Dropping the first {int(f.index[1])} regions ({share:.1%} of the sample) "
+    f"gains {gained_first} indicators.\n"
+    f"Every further step combined gains {gained_rest}.\n"
+    f"Total observations peak at n_dropped = {peak}."
+)
+```
+
+```{python}
+#| echo: false
+frontier[["n_dropped", "n_regions", "n_indicators", "n_cells"]]
+```
+
+Nearly all of the available gain arrives immediately, and the total quantity of
+data peaks early. Beyond that point the frontier trades observations away
+without recovering breadth, so the later steps are useful as a stress test
+rather than as candidate datasets.
+
+## What is traded away
+
+Regions are dropped worst-covered first, and coverage is not missing at random.
+
+```{python}
+#| label: tbl-dropped
+#| tbl-cap: "Countries losing the most regions at the largest step examined."
+
+worst = dropped_regions(WAREHOUSE, max(steps))
+by_country = (
+    worst.assign(country=worst.reg_id.str[:2])
+    .country.value_counts()
+    .rename("regions dropped")
+    .to_frame()
+)
+by_country.head(12)
+```
+
+Where dropped regions cluster in particular countries, the frontier trades
+indicator breadth for geographic representativeness — a cost the indicator count
+alone does not show.
+
+## Which predictors survive
+
+```{python}
+#| label: fig-stability
+#| column: page
+#| fig-cap: "Predictor selection across the frontier, ordered by how often each indicator is chosen."
+
+selected = {n: set(r["selected"]) for n, r in results.items()}
+every = sorted(set().union(*selected.values()))
+
+matrix = pd.DataFrame(
+    {n: [ind in selected[n] for ind in every] for n in steps}, index=every
+)
+matrix = matrix.loc[
+    matrix.assign(total=matrix.sum(axis=1))
+    .sort_values(["total"] + steps, ascending=False)
+    .index
+]
+
+fig, ax = plt.subplots(figsize=(11, 0.26 * len(matrix) + 2))
+ax.imshow(matrix.to_numpy(), aspect="auto", cmap="Greys", vmin=0, vmax=1.4)
+ax.set_xticks(range(len(steps)))
+ax.set_xticklabels(steps)
+ax.set_yticks(range(len(matrix)))
+ax.set_yticklabels([label(i) for i in matrix.index], fontsize=7)
+ax.set_xlabel("Regions dropped")
+for edge in range(len(steps) + 1):
+    ax.axvline(edge - 0.5, color="white", linewidth=2)
+plt.tight_layout()
+```
+
+```{python}
+#| echo: false
+n_always = int((matrix.sum(axis=1) == len(steps)).sum())
+n_once = int((matrix.sum(axis=1) == 1).sum())
+print(f"{len(matrix)} distinct indicators selected somewhere; "
+      f"{n_always} at every step, {n_once} at exactly one.\n")
+print("Selected at every step:")
+for ind in matrix.index[matrix.sum(axis=1) == len(steps)]:
+    print(f"  {label(ind)}")
+```
+
+An indicator selected everywhere is robust to the trade-off. One appearing once
+is specific to the indicators that happened to be available there.
+
+### The same comparison by concept
+
+Indicator-level churn overstates instability. The richer datasets contain
+finer-grained variants of the same underlying quantity — `EMP_RA` gives way to
+measures such as `EMP_SH_PT_F` — so an indicator disappearing from the matrix
+above may mean a more specific member of its family was chosen instead, not that
+the concept stopped mattering.
+
+```{python}
+#| label: fig-stability-concept
+#| column: page
+#| fig-cap: "Selection by concept. A family counts as selected if any member was chosen."
+
+concept_selected = {n: {concept(i) for i in r["selected"]} for n, r in results.items()}
+every_concept = sorted(set().union(*concept_selected.values()))
+
+cmatrix = pd.DataFrame(
+    {n: [c in concept_selected[n] for c in every_concept] for n in steps},
+    index=every_concept,
+)
+cmatrix = cmatrix.loc[
+    cmatrix.assign(total=cmatrix.sum(axis=1))
+    .sort_values(["total"] + steps, ascending=False)
+    .index
+]
+
+fig, ax = plt.subplots(figsize=(11, 0.34 * len(cmatrix) + 2))
+ax.imshow(cmatrix.to_numpy(), aspect="auto", cmap="Greys", vmin=0, vmax=1.4)
+ax.set_xticks(range(len(steps)))
+ax.set_xticklabels(steps)
+ax.set_yticks(range(len(cmatrix)))
+ax.set_yticklabels(cmatrix.index, fontsize=9)
+ax.set_xlabel("Regions dropped")
+for edge in range(len(steps) + 1):
+    ax.axvline(edge - 0.5, color="white", linewidth=2)
+plt.tight_layout()
+```
+
+```{python}
+#| label: tbl-concept-members
+#| tbl-cap: "Which indicator represents each concept at each step."
+
+members = pd.DataFrame(
+    [{"n_dropped": n, "concept": concept(i), "indicator": i}
+     for n, r in results.items() for i in r["selected"]]
+)
+
+(members.groupby(["concept", "n_dropped"])
+        .indicator.apply(lambda s: ", ".join(sorted(s)))
+        .unstack()
+        .fillna("-"))
+```
+
+Which member of a family is chosen is itself informative: a shift from a general
+rate to a specific sub-measure says something about which aspect of the concept
+carries the signal.
+
+```{python}
+#| echo: false
+ungrouped = sorted(
+    {i for r in results.values() for i in r["selected"] if concept(i) == i}
+)
+if ungrouped:
+    print("Indicators with no concept family assigned "
+          "(add them to CONCEPT in analysis/labels.py):")
+    for i in ungrouped:
+        print(f"  {i}")
+else:
+    print("Every selected indicator maps to a concept family.")
+```
+
+## Importance of the manuscript's predictors
+
+The manuscript argues that the sex ratio among the elderly is a predictor of
+comparable importance to disposable income. Tracking that across the frontier
+tests the claim directly. Importance is aggregated to the concept — the strongest
+selected member of each family — so a line does not break when the specific
+measure changes.
+
+```{python}
+#| label: fig-headline
+#| column: page
+#| fig-cap: "Permutation importance of the manuscript's predictor families across the frontier."
+
+imp = pd.concat(
+    [r["importance"].assign(n_dropped=n) for n, r in results.items()],
+    ignore_index=True,
+)
+imp["concept"] = imp.feature.map(concept)
+
+by_concept = imp.groupby(["concept", "n_dropped"]).importance.max().reset_index()
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+
+for name in HEADLINE_CONCEPTS:
+    d = by_concept[by_concept.concept == name].sort_values("n_dropped")
+    if not d.empty:
+        ax1.plot(d.n_dropped, d.importance, marker="o", label=name)
+ax1.axhline(1.0, color="grey", linestyle=":", linewidth=1)
+ax1.set_ylabel("Permutation importance (MSE ratio)")
+ax1.set_title("By concept", fontsize=10)
+ax1.legend(fontsize=8, frameon=False)
+
+for feature in MANUSCRIPT:
+    d = imp[imp.feature == feature].sort_values("n_dropped")
+    if not d.empty:
+        ax2.plot(d.n_dropped, d.importance, marker="o", label=label(feature, 24))
+ax2.axhline(1.0, color="grey", linestyle=":", linewidth=1)
+ax2.set_title("The manuscript's specific indicators", fontsize=10)
+ax2.legend(fontsize=7, frameon=False)
+
+for ax in (ax1, ax2):
+    ax.set_xlabel("Regions dropped")
+    ax.spines[["top", "right"]].set_visible(False)
+
+plt.tight_layout()
+
+by_concept[by_concept.concept.isin(HEADLINE_CONCEPTS)].pivot_table(
+    index="concept", columns="n_dropped", values="importance"
+)
+```
+
+A gap in the right-hand panel means that specific indicator was not selected at
+that step. A gap on the left means no member of the family was.
+
+## Interaction structure
+
+The manuscript's central figure rests on the employment rate having the
+strongest interaction, and on its interaction with the elderly sex ratio. Both
+the leading predictor and its top partner are re-derived at each step.
+
+```{python}
+#| label: tbl-interactions
+#| tbl-cap: "Strongest interacting predictor at each step, with the margin over second place."
+
+rows = []
+for n, r in results.items():
+    top = r["interactions"].head(2)
+    h1, h2 = float(top.iloc[0].interaction), float(top.iloc[1].interaction)
+    rows.append({
+        "n_dropped": n,
+        "strongest": label(r["top_feature"]),
+        "H": h1,
+        "second": label(top.iloc[1].feature),
+        "H (2nd)": h2,
+        "margin": h1 - h2,
+        "margin %": (h1 - h2) / h2 if h2 else np.nan,
+        "top partner": label(r["top_partner"]),
+    })
+
+interaction_table = pd.DataFrame(rows).set_index("n_dropped")
+interaction_table
+```
+
+The margin matters more than the ranking. Where two predictors are within a few
+per cent of one another, which leads is not a stable result — it will move with
+the seed and with the resolution of the interaction grid.
+
+```{python}
+#| label: fig-interaction-strength
+#| column: page
+#| fig-cap: "Interaction strength of the manuscript's predictor families across the frontier."
+
+inter = pd.concat(
+    [r["interactions"].assign(n_dropped=n) for n, r in results.items()],
+    ignore_index=True,
+)
+inter["concept"] = inter.feature.map(concept)
+inter_by_concept = inter.groupby(["concept", "n_dropped"]).interaction.max().reset_index()
+
+fig, ax = plt.subplots(figsize=(9, 5))
+for name in HEADLINE_CONCEPTS:
+    d = inter_by_concept[inter_by_concept.concept == name].sort_values("n_dropped")
+    if not d.empty:
+        ax.plot(d.n_dropped, d.interaction, marker="o", label=name)
+ax.set_xlabel("Regions dropped")
+ax.set_ylabel("Interaction strength (H)")
+ax.legend(fontsize=8, frameon=False)
+ax.spines[["top", "right"]].set_visible(False)
+plt.tight_layout()
+```
+
+### The interaction surface
+
+The manuscript's key figure is the joint ALE of the two strongest interacting
+predictors. Because both are re-derived at each step, the pair being plotted can
+differ — which is itself the test of whether the published pairing was an
+artefact of the indicators available.
+
+```{python}
+#| label: fig-ale-2d
+#| column: page
+#| fig-cap: "Second-order ALE surfaces. The pair shown is the strongest interaction found at that step."
+
+fig, axes = plt.subplots(1, len(steps), figsize=(4.2 * len(steps), 4))
+axes = np.atleast_1d(axes)
+
+for ax, n in zip(axes, steps):
+    r = results[n]
+    s = r["ale_2d"]
+    mesh = ax.pcolormesh(s["x1"], s["x2"], s["values"].T, cmap="Greys", shading="auto")
+    fig.colorbar(mesh, ax=ax, fraction=0.046)
+    ax.set_title(f"dropped {n}", fontsize=9)
+    ax.set_xlabel(label(r["top_feature"], 22), fontsize=7)
+    ax.set_ylabel(label(r["top_partner"], 22), fontsize=7)
+    ax.tick_params(labelsize=6)
+
+plt.tight_layout()
+```
+
+```{python}
+#| echo: false
+for n, r in results.items():
+    s = r["ale_2d"]
+    empty = int((s["counts"] == 0).sum())
+    total = int(s["counts"].size)
+    print(f"dropped {n:>4}: {label(r['top_feature'])} x {label(r['top_partner'])}"
+          f"  -  {empty}/{total} grid cells interpolated")
+```
+
+A high share of interpolated cells means the surface is largely smoothed from
+neighbouring values rather than estimated from observations. Structure appearing
+only in heavily interpolated regions should not be read as a finding.
+
+## Functional form
+
+```{python}
+#| label: fig-ale-comparison
+#| column: page
+#| fig-cap: "ALE curves for the manuscript's predictors, overlaid across steps."
+
+fig, axes = plt.subplots(1, len(MANUSCRIPT), figsize=(4.2 * len(MANUSCRIPT), 3.8))
+axes = np.atleast_1d(axes)
+
+for ax, feature in zip(axes, MANUSCRIPT):
+    for n, r in results.items():
+        d = r["ale_1d"]
+        d = d[d.feature == feature]
+        if not d.empty:
+            ax.step(d.x, d.ale, where="post", linewidth=1.3, alpha=0.85, label=str(n))
+    ax.axhline(0, color="grey", linestyle=":", linewidth=0.8)
+    ax.set_title(label(feature, 26), fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.spines[["top", "right"]].set_visible(False)
+
+axes[0].set_ylabel("ALE of subjective well-being")
+axes[-1].legend(title="dropped", fontsize=7, frameon=False)
+plt.tight_layout()
+```
+
+Curves keeping their shape across steps describe a relationship the model finds
+regardless of which other indicators are available. Curves changing sign or
+shape do not.
+
+## What this shows
+
+```{python}
+#| echo: false
+always_c = list(cmatrix.index[cmatrix.sum(axis=1) == len(steps)])
+survives = [c for c in HEADLINE_CONCEPTS if c in always_c]
+fails = [c for c in HEADLINE_CONCEPTS if c not in always_c]
+
+print(f"Concepts selected at every step ({len(always_c)}):")
+for c in always_c:
+    print(f"  {c}")
+
+print(f"\nOf the manuscript's {len(HEADLINE_CONCEPTS)} predictor families, "
+      f"{len(survives)} survive every step.")
+if fails:
+    print("Not selected everywhere: " + ", ".join(fails))
+
+narrow = interaction_table[interaction_table["margin %"].abs() < 0.10]
+if len(narrow):
+    print(f"\nAt {len(narrow)} of {len(steps)} steps the strongest and second "
+          f"strongest interactions are within 10% of one another.")
+```
+
+Three things follow.
+
+**The published dataset sat one step from a substantially richer one.** Dropping
+a small fraction of the worst-covered regions buys a large share of the
+available indicators, and total data peaks there rather than at zero. That is a
+design choice the original analysis made implicitly, by applying a completeness
+rule without examining its cost.
+
+**Concept-level stability is the meaningful test, not indicator-level.** The
+richer datasets substitute finer-grained measures within the same families, so
+raw selection churn overstates instability. Read the concept matrix and the
+members table together.
+
+**Interaction rankings are less separated than a single run suggests.** Where the
+margin between first and second place is small, the identity of the strongest
+interaction is not established, and conclusions resting on that ranking should
+be stated with the margin attached.
+
+::: {.callout-note}
+## How to read these comparisons
+
+The datasets are nested subsets of one another, the same data drives both
+selection and evaluation, and the retained sample changes with every step. These
+are exploratory robustness checks, not hypothesis tests. A predictor selected at
+every step is more credible than one selected once; a difference between two
+steps is not a measured effect.
+:::
