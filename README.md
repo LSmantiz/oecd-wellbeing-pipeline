@@ -40,7 +40,7 @@ not-null assertion against a column whose name is not known until runtime.
 
 | File | What it does |
 |---|---|
-| `analysis.qmd` | The reproduction: selection, tuning, model comparison, interpretation |
+| `python_ml_analysis.qmd` | The reproduction: selection, tuning, model comparison, interpretation |
 | `frontier_comparison.qmd` | Robustness across the completeness frontier (see below) |
 
 Both read from cached artifacts and modules; neither contains analysis logic of

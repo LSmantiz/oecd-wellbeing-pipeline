@@ -1,4 +1,4 @@
-----
+---
 title: "Gender and age matter! Identifying important predictors for subjective well-being using machine learning methods"
 author: "Lasare Samartzidis"
 format:
@@ -7,7 +7,6 @@ format:
     toc: true
 jupyter: python3
 execute:
-  cache: true
   warning: false
 ---
 
@@ -216,7 +215,7 @@ plt.tight_layout()
 #| label: fig-interactions-emp
 #| fig-cap: "Pairwise interaction strength with the employment rate."
 
-
+from analysis.ale import ale_2d, plot_ale_2d
 
 emp_rf  = interaction_with(models["rf"],  X_all, "EMP_RA")
 emp_xgb = interaction_with(models["xgb"], X_all, "EMP_RA")

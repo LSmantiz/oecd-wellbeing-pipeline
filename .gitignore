@@ -8,3 +8,7 @@ __pycache__/
 data/original_data/
 data/processed_data/
 analysis/output/
+transform/logs/
+logs/
+/.quarto/
+**/*.quarto_ipynb
